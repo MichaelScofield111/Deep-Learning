@@ -156,3 +156,60 @@ def box_iou(boxes1, boxes2):
     return inter_areas / union_areas
 
 
+
+
+ground_truth = torch.tensor([[0.1, 0.08, 0.52, 0.92],
+                         [ 0.55, 0.2, 0.9, 0.88]])
+anchors = torch.tensor([[0, 0.1, 0.2, 0.3], [0.15, 0.2, 0.4, 0.4],
+                    [0.63, 0.05, 0.88, 0.98], [0.66, 0.45, 0.8, 0.8],
+                    [0.57, 0.3, 0.92, 0.9]])
+
+
+def assign_anchor_to_bbox(ground_truth, anchors, device, iou_threshold=0.5):
+    """将最接近的真实边界框分配给锚框。"""
+    # 锚框数量和真实边界框数量
+    num_anchors, num_gt_boxes = anchors.shape[0], ground_truth.shape[0] #在例子中是5个anchors和2个gt
+    # 计算每个锚框与每个真实边界框的iou值，[n1,n2]
+    jaccard = box_iou(anchors, ground_truth)
+    """
+       tensor([[0.0536, 0.0000],
+               [0.1417, 0.0000],
+               [0.0000, 0.5657],
+               [0.0000, 0.2059],
+               [0.0000, 0.7459]])
+       """
+    # 定义anchors_bbox_map来记录anchor分别对应着什么gt，anchors_bbox_map存放标签初始全为-1
+    anchors_bbox_map = torch.full((num_anchors), -1, dtype=torch.long, device=device)
+
+    # 得到每行的最大值，即对于每个锚框来说，iou最大的那个真实边界框，返回iou值和对应真实边界框索引值[n1],[n1]
+    max_ious, indices = torch.max(jaccard, dim=1)
+    # 根据阈值得到锚框不为背景的相应的索引值[<=n1]
+    anc_i = torch.nonzero(max_ious >= iou_threshold).reshape(-1)
+    # 根据阈值得到锚框不为背景的真实边界框索引值[<=n1]，与anc_i一一对应的
+    box_j = indices[max_ious >= iou_threshold]
+    # 挑出>=iou_threshold的值,重新赋值，也就是对每个锚框，得到大于给定阈值的匹配的真实gt边界框的对应索引
+    anchors_bbox_map[anc_i] = box_j
+    # 行，列的默认值[n1],[n2]
+    col_discard = torch.full((num_anchors,), -1)
+    row_discard = torch.full((num_gt_boxes,), -1)
+
+    #保证每个gt都有锚框,故开始重新分配锚框
+    for _ in range(num_gt_boxes):
+        # 取得该矩形中最大值的索引，是按reshape(-1)得到的索引 0-(n1*n2-1)
+        max_idx = torch.argmax(jaccard)
+        # 得到矩阵最大值所在的列，就是对应的真实gt边界框的索引
+        box_idx = (max_idx % num_gt_boxes).long()
+        anc_idx = (max_idx / num_gt_boxes).long()
+
+        anchors_bbox_map[anc_idx] = box_idx
+        # 将最大值所在该行置为-1
+        jaccard[:, box_idx] = col_discard
+        # 将最大值所在该列置为-1
+        jaccard[anc_idx, :] = row_discard
+    return anchors_bbox_map
+
+
+
+
+
+
