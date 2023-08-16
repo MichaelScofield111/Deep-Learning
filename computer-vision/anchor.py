@@ -118,8 +118,8 @@ def box_iou(boxes1, boxes2):
     # boxes1(左上角x，左上角y，右下角x，右下角y)
     # 这边举个例子：boxes1 [1,1,3,3],[0,0,2,4],[1,2,3,4]]   ；boxes2[[0,0,3,3],[2,0,5,2]]
     # 首先计算一个框的面积（长X宽）
-    box_area = lambda boxes: ((boxes[:,2] - boxes[:,0]) *
-                               boxes[:,1] - boxes[:,3])
+    box_area = lambda boxes: ((boxes[:, 2] - boxes[:, 0]) *
+                              (boxes[:, 3] - boxes[:, 1]))
     areas1 = box_area(boxes1)
     areas2 = box_area(boxes2)
     # 重叠部分左上角坐标（取最大的值） 先提取左上角的坐标
@@ -155,14 +155,6 @@ def box_iou(boxes1, boxes2):
     union_areas = areas1[:, None] + areas2 - inter_areas
     return inter_areas / union_areas
 
-
-
-
-ground_truth = torch.tensor([[0.1, 0.08, 0.52, 0.92],
-                         [ 0.55, 0.2, 0.9, 0.88]])
-anchors = torch.tensor([[0, 0.1, 0.2, 0.3], [0.15, 0.2, 0.4, 0.4],
-                    [0.63, 0.05, 0.88, 0.98], [0.66, 0.45, 0.8, 0.8],
-                    [0.57, 0.3, 0.92, 0.9]])
 
 
 def assign_anchor_to_bbox(ground_truth, anchors, device, iou_threshold=0.5):
@@ -209,7 +201,168 @@ def assign_anchor_to_bbox(ground_truth, anchors, device, iou_threshold=0.5):
     return anchors_bbox_map
 
 
+#要好预测,尽量均值为0,分的比较开
+def offset_boxes(anchors, assigned_bb, eps=1e-6):
+    """对锚框偏移量的转换。"""
+    # 坐标转换 从（左上，右下）转换到（中间，宽度，高度）
+    c_anc = d2l.box_corner_to_center(anchors)
+    c_assigned_bb = d2l.box_corner_to_center(assigned_bb) #真实边框坐标
+    # 偏移量计算公式
+    # 除0.2和0.1就是*10和*5
+    offset_xy = 10 * (c_assigned_bb[:, :2] - c_anc[:, :2]) / c_anc[:, 2:]
+    offset_wh = 5 * torch.log(c_assigned_bb[:, 2:] / c_anc[:, 2:] + eps)
+
+    #拼接
+    offset = torch.cat([offset_xy, offset_wh], axis = 1)
+    return offset
 
 
 
+# anchors输入的锚框[1,锚框总数，4] labels真实标签[bn,真实锚框数，5]
+#在下面的例子中为5，gt数目为2
 
+# labels = torch.tensor([[0, 0.1, 0.08, 0.52, 0.92],
+#                          [1, 0.55, 0.2, 0.9, 0.88]])
+# anchors = torch.tensor([[0, 0.1, 0.2, 0.3], [0.15, 0.2, 0.4, 0.4],
+#                     [0.63, 0.05, 0.88, 0.98], [0.66, 0.45, 0.8, 0.8],
+#                     [0.57, 0.3, 0.92, 0.9]])
+
+def multibox_target(anchors, labels):
+    """使用真实边界框标记锚框。"""
+    batch_size, anchors = labels.shape[0], anchors.squeeze[0]
+    batch_offset, batch_mask, batch_class_labels = [], [], []
+    device, num_anchors = anchors.device, anchors.shape[0]
+    # 处理每个label
+    for i in range(batch_size):
+        #真实边框
+        label = label[i, :, :]
+        # 为每个锚框分配真实的边界框
+        # assign_anchor_to_bbox函数返回，每个anchor分配的真实bb对应的索引, 若未分配任何bb则为-1
+        # tensor([-1,  0,  1, -1,  1])
+        # 这边label[:, 1:] 从1开始是因为，求IOU的时候不需要用到类别
+        anchors_bbox_map = assign_anchor_to_bbox(label[:,1:], anchors, device)
+        bbox_mask = ((anchors_bbox_map >= 0).float().unsqueeze(-1)).repeat(1, 4)
+
+        # 将类标签和分配的边界框坐标初始化为零，tensor([0, 0, 0, 0, 0])
+        class_labels = torch.zeros(num_anchors, dtype=torch.long, device=device)
+        # 所有anchor对应的真实边框坐标
+        assigned_bb = torch.zeros((num_anchors, 4), dtype=torch.float32, device=device)
+        # 如果一个锚框没有被分配，我们标记其为背景（值为零）
+        indices_true = torch.nonzero(anchors_bbox_map >= 0)  #找到索引不是背景
+        # 非背景对应的类别标签索引 0,1,1
+        bb_idx = anchors_bbox_map[indices_true] #拿到标签了
+        class_labels[indices_true] = label[bb_idx, 0].long() + 1
+        assigned_bb[indices_true] = label[bb_idx, 1:]
+        # 偏移量转换
+        offset = offset_boxes(anchors, assigned_bb) * bbox_mask
+        batch_offset.append(offset.reshape(-1))
+        batch_mask.append(bbox_mask.reshape(-1))
+        batch_class_labels.append(class_labels)
+    bbox_offset = torch.stack(batch_offset)
+    bbox_mask = torch.stack(batch_mask)
+    class_labels = torch.stack(batch_class_labels)
+    return (bbox_offset, bbox_mask, class_labels)
+
+
+
+ground_truth = torch.tensor([[0, 0.1, 0.08, 0.52, 0.92],
+                         [1, 0.55, 0.2, 0.9, 0.88]])
+anchors = torch.tensor([[0, 0.1, 0.2, 0.3], [0.15, 0.2, 0.4, 0.4],
+                    [0.63, 0.05, 0.88, 0.98], [0.66, 0.45, 0.8, 0.8],
+                    [0.57, 0.3, 0.92, 0.9]])
+
+fig = d2l.plt.imshow(img)
+show_bboxes(fig.axes, ground_truth[:, 1:] * bbox_scale, ['dog', 'cat'], 'k')
+show_bboxes(fig.axes, anchors * bbox_scale, ['0', '1', '2', '3', '4']);
+plt.show()
+
+#预测的时候anchors是已知的，offset_preds是预测出来的
+# 该函数将锚框和偏移量预测作为输入，并应用逆偏移变换来返回预测的边界框坐标。
+def offset_inverse(anchors, offset_preds):
+    """根据带有预测偏移量的锚框来预测边界框。"""
+    # 从（左上，右下）转换到（中间，宽度，高度）
+    anc = d2l.box_corner_to_center(anchors)
+    pred_bbox_xy = (offset_preds[:, :2] * anc[:, 2:] / 10) + anc[:, :2]
+    pred_bbox_wh = torch.exp(offset_preds[:, 2:] / 5) * anc[:, 2:]
+    pred_bbox = torch.cat((pred_bbox_xy, pred_bbox_wh), axis=1)
+    # 从（中间，宽度，高度）转换到（左上，右下）
+    predicted_bbox = d2l.box_center_to_corner(pred_bbox)
+    return predicted_bbox
+
+# 按降序对置信度进行排序并返回其索引
+def nms(boxes, scores, iou_threshold):
+    """对预测边界框的置信度进行排序"""
+    B = torch.argsort(scores, dim = -1, descending=True)
+    keep = [] #保留预测边界框的指标
+    while B.numel() > 0:
+        i = B[0]
+        keep.append(i)
+        if B.numel() == 1: break
+        iou = box_iou(boxes[i, :].reshape(-1, 4),
+                      boxes[B[1:], :].reshape(-1, 4)).reshape(-1)
+        inds = torch.nonzero(iou <= iou_threshold).reshape(-1)
+        B = B[inds + 1]
+    return torch.tensor(keep, device=boxes.device)
+
+
+#@save
+def multibox_detection(cls_probs, offset_preds, anchors, nms_threshold=0.5,
+                       pos_threshold=0.009999999):
+    """使用非极大值抑制来预测边界框"""
+    device, batch_size = cls_probs.device, cls_probs.shape[0]
+    anchors = anchors.squeeze(0)
+    num_classes, num_anchors = cls_probs.shape[1], cls_probs.shape[2]
+    out = []
+    for i in range(batch_size):
+        cls_prob, offset_pred = cls_probs[i], offset_preds[i].reshape(-1, 4)
+        conf, class_id = torch.max(cls_prob[1:], 0)
+        predicted_bb = offset_inverse(anchors, offset_pred)
+        keep = nms(predicted_bb, conf, nms_threshold)
+
+        # 找到所有的non_keep索引，并将类设置为背景
+        all_idx = torch.arange(num_anchors, dtype=torch.long, device=device)
+        combined = torch.cat((keep, all_idx))
+        uniques, counts = combined.unique(return_counts=True)
+        non_keep = uniques[counts == 1]
+        all_id_sorted = torch.cat((keep, non_keep))
+        class_id[non_keep] = -1
+        class_id = class_id[all_id_sorted]
+        conf, predicted_bb = conf[all_id_sorted], predicted_bb[all_id_sorted]
+        # pos_threshold是一个用于非背景预测的阈值
+        below_min_idx = (conf < pos_threshold)
+        class_id[below_min_idx] = -1
+        conf[below_min_idx] = 1 - conf[below_min_idx]
+        pred_info = torch.cat((class_id.unsqueeze(1),
+                               conf.unsqueeze(1),
+                               predicted_bb), dim=1)
+        out.append(pred_info)
+    return torch.stack(out)
+
+
+anchors = torch.tensor([[0.1, 0.08, 0.52, 0.92], [0.08, 0.2, 0.56, 0.95],
+                      [0.15, 0.3, 0.62, 0.91], [0.55, 0.2, 0.9, 0.88]])
+offset_preds = torch.tensor([0] * anchors.numel())
+cls_probs = torch.tensor([[0] * 4,  # 背景的预测概率
+                      [0.9, 0.8, 0.7, 0.1],  # 狗的预测概率
+                      [0.1, 0.2, 0.3, 0.9]])  # 猫的预测概率
+
+fig = d2l.plt.imshow(img)
+show_bboxes(fig.axes, anchors * bbox_scale,
+            ['dog=0.9', 'dog=0.8', 'dog=0.7', 'cat=0.9'])
+
+
+output = multibox_detection(cls_probs.unsqueeze(dim=0),
+                            offset_preds.unsqueeze(dim=0),
+                            anchors.unsqueeze(dim=0),
+                            nms_threshold=0.5)
+print(output)
+
+fig = d2l.plt.imshow(img)
+for i in output[0].detach().numpy():
+    if i[0] == -1:
+        continue
+    label = ('dog=', 'cat=')[int(i[0])] + str(i[1])
+    show_bboxes(fig.axes, [torch.tensor(i[2:]) * bbox_scale], label)
+
+
+plt.show()
