@@ -251,8 +251,9 @@ def multibox_target(anchors, labels):
         indices_true = torch.nonzero(anchors_bbox_map >= 0)  #找到索引不是背景
         # 非背景对应的类别标签索引 0,1,1
         bb_idx = anchors_bbox_map[indices_true] #拿到标签了
-        class_labels[indices_true] = label[bb_idx, 0].long() + 1
+        class_labels[indices_true] = label[bb_idx, 0].long() + 1 #把有标签的锚框，取成它的标签数+1
         assigned_bb[indices_true] = label[bb_idx, 1:]
+
         # 偏移量转换
         offset = offset_boxes(anchors, assigned_bb) * bbox_mask
         batch_offset.append(offset.reshape(-1))
