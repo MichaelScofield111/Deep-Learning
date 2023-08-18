@@ -52,7 +52,7 @@ batch_size = 256;
 
 def get_dataloader_workers():
     """"使用4个进程来读取的数据"""
-    return 4
+    return 0
 
 train_iter = data.DataLoader(mnist_train, batch_size, shuffle=True
                              ,num_workers=get_dataloader_workers())
