@@ -10,7 +10,7 @@ print(w,h)
 #轴坐标值（anchors）已经被除以特征图（fmap）的宽度和高度，因此这些值介于0和1之间，表示特征图中锚框的相对位置。
 def display_anchors(fmap_w, fmap_h, s):
     d2l.set_figsize()
-    fmap = torch.zeros((1, 10, fmap_h, fmap_w))
+    fmap = torch.zeros((1, 10, fmap_h, fmap_w)) #batch_size取1 通道数取10
     anchors = d2l.multibox_prior(fmap, sizes=s, ratios=[1, 2, 0.5])
     bbox_scale = torch.tensor((w, h, w, h))
     d2l.show_bboxes(d2l.plt.imshow(img).axes,
