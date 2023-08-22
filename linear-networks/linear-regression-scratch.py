@@ -70,6 +70,7 @@ loss = squared_loss
 for epoch in range(num_epochs):
     for X, y in data_iter(batch_size, features, labels):
         l = loss(net(X, w, b), y)
+        print(l.shape , l.sum)
         #求 w, b的梯度标量
         l.sum().backward()
         #update w and b
