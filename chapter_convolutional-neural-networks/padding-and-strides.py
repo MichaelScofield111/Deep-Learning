@@ -6,7 +6,7 @@ def comp_conv2d(con2d, X):
     Y = con2d(X)
     return Y.reshape(Y.shape[2:])
 
-#计算公式 Nh-Kh+(Ph*2) - 1 = 8 - 3 + 2 + 1  同理... 另个一也是8
+#计算公式 Nh-Kh+(Ph*2) + 1 = 8 - 3 + 2 + 1  同理... 另个一也是8
 con2d = nn.Conv2d(1, 1, kernel_size=3, padding=1)
 X = torch.randn(size=(8, 8))
 print(comp_conv2d(con2d,X).shape)
