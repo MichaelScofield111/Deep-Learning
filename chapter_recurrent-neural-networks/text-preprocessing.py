@@ -40,26 +40,26 @@ class Vocab:
             tokens = []
         if reserved_tokens is None:
             reserved_tokens = []
+        # 按出现频率排序
         counter = count_corpus(tokens)
-        self.token_freqs = sorted(counter.items(), key=lambda x:x[1], reverse=True) #按元组的第二个元素（频率）进行排序
-
-        self.unk, uniq_token = 0, ['<unk>'] + reserved_tokens
-        uniq_token += [
-            token for token, freq in self.token_freqs
-            if freq >= min_freq and token not in uniq_token
-        ]
-
-        self.idx_to_token, self.token_to_idx = [], dict() #字典
-        for token in uniq_token:
-            self.idx_to_token.append(token)
-            self.token_to_idx[token] = len(self.idx_to_token) - 1
+        self._token_freqs = sorted(counter.items(), key=lambda x: x[1],
+                                   reverse=True)
+        # 未知词元的索引为0
+        self.idx_to_token = ['<unk>'] + reserved_tokens
+        self.token_to_idx = {token: idx
+                             for idx, token in enumerate(self.idx_to_token)}
+        for token, freq in self._token_freqs:
+            if freq < min_freq:
+                break
+            if token not in self.token_to_idx:
+                self.idx_to_token.append(token)
+                self.token_to_idx[token] = len(self.idx_to_token) - 1
 
     def __len__(self):
         return len(self.idx_to_token)
 
-    def __getitem__(self, token):
-        #如果传入的索引 token 不是一个列表或元组
-        if not isinstance(token, (list, tuple)):
+    def __getitem__(self, tokens):
+        if not isinstance(tokens, (list, tuple)):
             return self.token_to_idx.get(tokens, self.unk)
         return [self.__getitem__(token) for token in tokens]
 
@@ -68,6 +68,13 @@ class Vocab:
             return self.idx_to_token[indices]
         return [self.idx_to_token[index] for index in indices]
 
+    @property
+    def unk(self):  # 未知词元的索引为0
+        return 0
+
+    @property
+    def token_freqs(self):
+        return self._token_freqs
 
 
 def count_corpus(tokens):
@@ -80,4 +87,25 @@ def count_corpus(tokens):
 
 
 vocab = Vocab(tokens)
+#高频词给了小下标， 低频词给了大下标
 print(list(vocab.token_to_idx.items())[:10])
+for i in [0, 10]:
+    print('world:', tokens[i])
+    print('indices:', vocab[tokens[i]])
+
+def load_corups_time_machine(max_tokens=-1):
+    lines = read_time_machine() #list
+    tokens = tokenize(lines, 'char')
+    vocab = Vocab(tokens)
+    corpus = [vocab[token]  #vocab[token]时，Python 会调用对象的 __getitem__
+              for line in tokens  #tokens [ [], [],... ] = line
+                for token in line] # token []一个词 或者 句子
+    #corpus就存的是一个list里面放这每个词的索引
+    if max_tokens > 0:
+        corpus = corpus[:max_tokens]
+    return corpus, vocab
+
+corpus, vocab = load_corups_time_machine()
+print(len(corpus), len(vocab))
+
+
