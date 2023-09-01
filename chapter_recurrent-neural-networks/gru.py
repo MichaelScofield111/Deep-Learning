@@ -41,7 +41,7 @@ def gru(inputs, state, params):
         H_tilda = torch.tanh((X @ W_xh) + ((R * H) @ W_hh) + b_h)
         H = Z * H + (1 - Z) * H_tilda
         Y = H @ W_hq + b_q
-        outputs.append(Y)
+        outputs.append(Y) 
     return torch.cat(outputs, dim=0), (H,)
 
 
